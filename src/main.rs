@@ -1,22 +1,25 @@
 mod connect_to;
 mod listening;
+mod manage_chat;
 
 use clap::Parser;
 use std::error::Error;
-use std::io;
-use std::net::{TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 
 #[derive(Parser, Debug)]
+#[command(author, version, about = "P2P Chat", long_about = None)]
 struct Cli {
-    #[arg(short = 'c', long = "connectto", num_args = 2, value_names = ["IP", "PORT"])]
+    #[arg(short = 'c', long = "connect", num_args = 2, value_names = ["IP", "PORT"])]
     ip_param: Option<Vec<String>>,
 
     #[arg(short = 'q', long = "quit")]
     quit: bool,
 
-    #[arg(short = 's', long = "start")]
-    start: bool,
+    #[arg(short = 'p', long = "port", value_parser = clap::value_parser!(u16).range(1..), default_value_t = 8080)]
+    listening_port: u16,
 }
+
+// allow private chat 
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Cli::parse();
@@ -26,15 +29,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    if args.start {
-        start_listening();
-    }
-
     if let Some(params) = args.ip_param {
         connection(params);
+        
     } else {
         println!("No action specified.");
     }
+
+    start_listening(args.listening_port);
+    manage_chat::manage_chat("get_all_messages".to_string());
 
     Ok(())
 }
@@ -47,13 +50,15 @@ fn connection(params: Vec<String>) {
     if let Err(e) = connect_to::connect_to(ip, port) {
         println!("Failed to connect: {}", e);
     } else {
-        println!("Connection established.");
+        println!("Connection established with {}:{}.", ip, port);
     }
 }
 
-fn start_listening() {
-    let listener = TcpListener::bind("0.0.0.0:8080").expect("Failed to bind to address");
-    println!("Waiting for connections on port 8080...");
+fn start_listening(listening_port: u16) {
+    let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), listening_port);
+    let listener = TcpListener::bind(&socket).expect("Failed to bind to address");
+
+    println!("Listening on port {} for connections", listening_port);
 
     for stream in listener.incoming() {
         match stream {
