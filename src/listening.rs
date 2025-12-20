@@ -1,8 +1,11 @@
 use std::io::{Read, Write};
 use std::net::{TcpStream};
+use serde::{Serialize, Deserialize};
+
+use crate::manage_chat::{self, Chat};
 
 
-pub fn listen(mut stream: TcpStream) {
+pub fn listen(mut stream: TcpStream, chat: &mut Chat) {
     let mut buffer: [u8; 1024] = [0; 1024]; // Max amout of bytes from the client
     let n = stream.read(&mut buffer).expect("Connection error");
 
@@ -12,6 +15,8 @@ pub fn listen(mut stream: TcpStream) {
     println!("{} has entered the chat", peer_address);
     println!("Request: {}", request);
 
-    let response = "Connected".as_bytes();
-    stream.write(response).expect("Failed to write response");
+    let all_messages = manage_chat::Chat::get_all_local_messages(chat);
+
+    let response_json = serde_json::to_string(&all_messages).expect("Failed to serialize");
+    stream.write_all(response_json.as_bytes()).expect("Failed to write response");
 }
