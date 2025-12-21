@@ -1,7 +1,7 @@
 use tokio::net::TcpStream;
 use tokio::io::Result;
 
-pub async fn connect_to(ip: &str, port: u16, chat_id: &str) -> Result<TcpStream> {
+pub async fn connect_to(ip: &str, port: u16) -> Result<TcpStream> {
     let address = format!("{}:{}", ip, port);
 
     match TcpStream::connect(&address).await {
@@ -16,7 +16,7 @@ pub async fn connect_to(ip: &str, port: u16, chat_id: &str) -> Result<TcpStream>
     }
 }
 
-pub fn request_messages(chat_id: &str, stream: &mut TcpStream) -> Result<()> {
+pub fn request_messages(stream: &mut TcpStream) -> Result<()> {
     // inviare richiesta avente tipo system per esempio per differenziare dai messaggi
 
     Ok(())
