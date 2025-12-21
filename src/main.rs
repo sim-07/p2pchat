@@ -26,7 +26,7 @@ struct Cli {
     #[arg(short = 'u', long = "username")]
     username: String,
 
-    #[arg(short = 'c', long = "chatinit")]
+    #[arg(short = 'i', long = "initchat")]
     chat_init: bool,
 
     #[arg(short = 'f', long = "filesend")]
@@ -36,7 +36,6 @@ struct Cli {
     listening_port: u16,
 }
 
-// allow private chat
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Cli::parse();
@@ -60,19 +59,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         let mut stream: Option<TcpStream> = connect(ip, port).await;
 
-        request_messages(stream.as_mut());
-    } else {
-        println!("No action specified.");
+        receive_all_messages(stream.as_mut());
     }
 
-    if args.chat_init {
-        let chat_listening = Arc::clone(&chat);
-        tokio::spawn(async move {
-            start_listening(args.listening_port, chat_listening).await;
-        });
+    let chat_listening = Arc::clone(&chat);
+    tokio::spawn(async move {
+        start_listening(args.listening_port, chat_listening).await;
+    });
 
-        manage_chat::start_chat(Arc::clone(&chat), member).await;
-    }
+    manage_chat::start_chat(Arc::clone(&chat), member).await;
 
     if args.file_send {
         //manage_chat::manage_send_files().await;
@@ -81,11 +76,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn request_messages(stream: Option<&mut TcpStream>) {
+fn receive_all_messages(stream: Option<&mut TcpStream>) {
     if let Some(stream) = stream {
-        if let Err(e) = connection::request_messages(stream) {
-            println!("Error sending request: {}", e);
-        }
+        let messages = connection::receive_all_messages(stream); /////////
+        
     } else {
         println!("No TcpStream available");
     }
@@ -97,6 +91,7 @@ async fn connect(ip: &String, port: u16) -> Option<TcpStream> {
     match connection::connect_to(ip, port).await {
         Ok(stream) => {
             println!("Connection established with {}:{}.", ip, port);
+
             return Some(stream);
         }
         Err(e) => {

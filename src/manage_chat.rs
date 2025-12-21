@@ -15,7 +15,7 @@ pub struct Message {
     timestamp: u64,
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Clone)]
 pub struct Member {
     // TODO creare nel main se stessi e aggiungersi a members. Poi inviare la nuova lista membri a tutti (aggiungere verifica legittimità)
     pub ip: String,
@@ -24,6 +24,7 @@ pub struct Member {
     pub id: String,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Chat {
     pub all_messages: Vec<Arc<Message>>,
     pub members: Vec<Arc<Member>>,
