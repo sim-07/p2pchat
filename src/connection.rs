@@ -19,6 +19,9 @@ pub async fn receive_all_messages(stream: &mut TcpStream) -> tokio::io::Result<S
     let mut buffer = [0; 4096];
 
     match stream.read(&mut buffer).await {
+        Ok(0) => {
+            Err(tokio::io::Error::new(tokio::io::ErrorKind::ConnectionAborted, "Peer disconnected"))
+        }
         Ok(n) => {
             let json = String::from_utf8_lossy(&buffer[..n]);
             Ok(json.into_owned()) // .into_owned() converte un riferimento (&str) a un tipo posseduto (String)

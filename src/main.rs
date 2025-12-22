@@ -3,14 +3,14 @@ mod listening;
 mod manage_chat;
 
 use clap::Parser;
-use uuid::Uuid;
+use local_ip_address::local_ip;
+use tokio::io::AsyncWriteExt;
 use std::error::Error;
-use std::mem;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
-use local_ip_address::local_ip;
+use uuid::Uuid;
 
 use crate::manage_chat::{Chat, Member};
 
@@ -32,7 +32,7 @@ struct Cli {
     #[arg(short = 'f', long = "filesend")]
     file_send: bool,
 
-    #[arg(short = 'p', long = "port", value_parser = clap::value_parser!(u16).range(1..), default_value_t = 8080)]
+    #[arg(short = 'p', long = "port", default_value_t = 0)]
     listening_port: u16,
 }
 
@@ -45,43 +45,84 @@ async fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let my_ip: String = local_ip().map(|ip| ip.to_string()).unwrap_or_else(|_| "127.0.0.1".to_string());
+    let my_ip: String = local_ip()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|_| "127.0.0.1".to_string());
     println!("Your local ip: {}", my_ip);
 
     let username = args.username;
-    let my_port: u16 = args.listening_port;
-    let member: Arc<Mutex<Member>> = Arc::new(Mutex::new(Member::new(username.clone(), my_ip, my_port, Uuid::new_v4().to_string())));
+    let selected_port: u16 = args.listening_port;
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), selected_port);
+    let listener = TcpListener::bind(&addr).await.expect("Failed to bind");
+    let used_port = listener.local_addr()?.port(); // anche se l'utente non ha impostato nessuna porta con quella di default a 0 l'OS sceglierà una porta libera
+    println!("Your port: {}", used_port);
+    let member: Arc<Mutex<Member>> = Arc::new(Mutex::new(Member::new(
+        username.clone(),
+        my_ip,
+        used_port,
+        Uuid::new_v4().to_string(),
+    )));
     let chat: Arc<Mutex<Chat>> = Arc::new(Mutex::new(Chat::new()));
 
     if let Some(params) = args.ip_param {
-        let ip: &String = &params[0];
-        let port: u16 = params[1].parse().expect("Port must be a number");
+        let member_clone = Arc::clone(&member);
 
-        let mut stream: Option<TcpStream> = connect(ip, port).await;
+        tokio::spawn(async move {
+            let ip: String = params[0].clone();
+            let port: u16 = params[1].parse().expect("Port must be a number");
+            
+            let member_lock = member_clone.lock().await;
+            let member_string =
+                serde_json::to_string(&*member_lock).expect("Failed to serialize member");
 
-        receive_all_messages(stream.as_mut());
+            let mut stream = match connect(&ip, port).await {
+                Some(s) => s,
+                None => {
+                    println!("Connection error");
+                    return;
+                }
+            };
+
+            if let Err(e) = stream.write_all(member_string.as_bytes()).await {
+                eprintln!("Failed to send handshake: {}", e);
+                return;
+            }
+
+            if let Ok(messages) = receive_messages(stream).await {
+                println!("MESSAGGI: {}", messages);
+                // TODO displaymessages...
+            } else {
+                println!("Disconnected");
+            }
+        });
     }
 
     let chat_listening = Arc::clone(&chat);
     tokio::spawn(async move {
-        start_listening(args.listening_port, chat_listening).await;
+        start_listening(listener, chat_listening).await;
     });
 
     manage_chat::start_chat(Arc::clone(&chat), member).await;
 
     if args.file_send {
-        //manage_chat::manage_send_files().await;
+        //TODO manage_chat::manage_send_files().await;
     }
 
     Ok(())
 }
 
-fn receive_all_messages(stream: Option<&mut TcpStream>) {
-    if let Some(stream) = stream {
-        let messages = connection::receive_all_messages(stream); /////////
-        
-    } else {
-        println!("No TcpStream available");
+async fn receive_messages(mut stream: TcpStream) -> tokio::io::Result<String> {
+    loop {
+        match connection::receive_all_messages(&mut stream).await {
+            // con await si ferma finché non arriva qualcosa
+            Ok(am) => {
+                println!("MESSAGES: {}", am)
+            }
+            Err(e) => {
+                println!("Disconnected: {}", e);
+                return Err(e);
+            }
+        };
     }
 }
 
@@ -101,14 +142,7 @@ async fn connect(ip: &String, port: u16) -> Option<TcpStream> {
     };
 }
 
-async fn start_listening(listening_port: u16, chat: Arc<Mutex<Chat>>) {
-    let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), listening_port);
-    let listener = TcpListener::bind(&socket)
-        .await
-        .expect("Failed to bind to address");
-
-    println!("Listening on port {} for connections", listening_port);
-
+async fn start_listening(listener: TcpListener, chat: Arc<Mutex<Chat>>) {
     loop {
         let (stream, _) = listener.accept().await.expect("Failed to accept");
 
