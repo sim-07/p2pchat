@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
@@ -10,18 +9,39 @@ use rustyline::error::ReadlineError;
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Message {
     // TODO trasferire anche file
-    sender: String,
+    sender: Member,
     text: String,
     timestamp: u64,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Clone)]
+impl Message {
+    pub fn new(sender: Member, text: String, timestamp: u64) -> Self {
+        Self {
+            sender,
+            text,
+            timestamp,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
 pub struct Member {
     // TODO creare nel main se stessi e aggiungersi a members. Poi inviare la nuova lista membri a tutti (aggiungere verifica legittimità)
     pub ip: String,
     pub port: u16,
     pub username: String,
     pub id: String,
+}
+
+impl Member {
+    pub fn new(username: String, ip: String, port: u16, id: String) -> Self {
+        Self {
+            username,
+            ip,
+            port,
+            id,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -38,34 +58,29 @@ impl Chat {
         }
     }
 
-    pub fn store_messages(&mut self, sender: String, text: String) {
-        let message: Message = Message {
-            sender,
-            text,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        };
-        self.all_messages.push(Arc::new(message));
+    pub fn set_all_messages(&mut self, messages: Vec<Arc<Message>>) {
+        self.all_messages = messages;
     }
 
-    pub fn get_all_local_messages(&self) -> Vec<Arc<Message>> {
+    pub fn set_members(&mut self, members: Vec<Arc<Member>>) {
+        self.members = members;
+    }
+
+    pub fn get_all_messages(&self) -> Vec<Arc<Message>> {
         self.all_messages.clone()
     }
 
-    pub fn get_all_local_members(&self) -> Vec<Arc<Member>> {
+    pub fn add_message(&mut self, message: Message) {
+        self.all_messages.push(Arc::new(message));
+    }
+
+    pub fn get_members(&self) -> Vec<Arc<Member>> {
         self.members.clone()
     }
-}
 
-impl Member {
-    pub fn new(username: String, ip: String, port: u16, id: String) -> Self {
-        Self {
-            username,
-            ip,
-            port,
-            id,
+    pub fn print_all_messages(&self) {
+        for message in &self.all_messages {
+            println!("[{:?}]: {}", message.sender, message.text)
         }
     }
 }
@@ -86,9 +101,12 @@ pub async fn start_chat(chat: Arc<Mutex<Chat>>, member: Arc<Mutex<Member>>) {
 
         match readline {
             Ok(line) => {
-                let sender_username = member.lock().await.clone();
+                println!("Message: {}", line);
+                let member_lock = member.lock().await.clone();
                 let mut chat_lock = chat.lock().await;
-                chat_lock.store_messages(sender_username.username, line);
+
+                let message: Message = Message::new(member_lock, line, get_timestamp());
+                chat_lock.add_message(message);
             }
             Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
                 println!("Exiting chat...");
@@ -100,4 +118,11 @@ pub async fn start_chat(chat: Arc<Mutex<Chat>>, member: Arc<Mutex<Member>>) {
             }
         }
     }
+}
+
+pub fn get_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Timestamp error")
+        .as_secs()
 }
