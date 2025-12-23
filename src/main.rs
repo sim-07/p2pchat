@@ -53,7 +53,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Your local ip: {}", my_ip);
 
     let (tx, _rx) = broadcast::channel::<Message>(32);
-    
 
     let username = args.username;
     let selected_port: u16 = args.listening_port;
@@ -69,16 +68,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
     )));
 
     let chat: Arc<Mutex<Chat>> = Arc::new(Mutex::new(Chat::new()));
+
+    let member_lock_s = member.lock().await.clone();
+    {
+        let mut chat_lock_s = chat.lock().await;
+        chat_lock_s.add_member(member_lock_s); // aggiungo l'utente corrente alla lista membri
+    }
+
     let chat_listening = Arc::clone(&chat);
 
     let tx_listen = tx.clone();
-    tokio::spawn(async move { // server side
+    tokio::spawn(async move {
+        // server side
         loop {
             let (stream, _) = listener.accept().await.expect("Failed to accept");
             let chat_listening_copy = Arc::clone(&chat_listening);
 
             let rx_listen = tx_listen.subscribe();
-            
+
             tokio::spawn(async move {
                 listening::listen(stream, chat_listening_copy, rx_listen).await;
             });
@@ -86,7 +93,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     let tx_connect = tx.clone();
-    if let Some(params) = args.ip_param { // client side
+    if let Some(params) = args.ip_param {
+        // client side
         let member_clone: Arc<Mutex<Member>> = Arc::clone(&member);
         let chat: Arc<Mutex<Chat>> = Arc::clone(&chat);
 
@@ -103,7 +111,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
             };
 
             let member_to_send = member_clone.lock().await.clone();
-
             let packet_handshake: Packet = Packet::InitSyncRequest(member_to_send);
             if let Err(e) = send::send(&mut stream, &packet_handshake).await {
                 println!("Error sending messages: {}", e);
@@ -112,8 +119,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
             if let Err(e) = connection::receive_packet(&mut stream, &chat).await {
                 println!("Error receiving packets: {}", e);
             }
-
-            // TODO connettersi a tutti i membri della chat
 
             let rx_listen = tx_connect.subscribe();
             listening::listen(stream, chat, rx_listen).await;

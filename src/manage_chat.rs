@@ -69,6 +69,10 @@ impl Chat {
         self.all_messages.push(Arc::new(message));
     }
 
+    pub fn add_member(&mut self, member: Member) {
+        self.members.push(Arc::new(member));
+    }
+
     pub fn print_all_messages(&self) {
         for message in &self.all_messages {
             println!("[{:?}]: {}", message.sender, message.text);
