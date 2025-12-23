@@ -1,5 +1,5 @@
 pub mod connection;
-mod listening;
+mod listen;
 mod manage_chat;
 mod manage_packets;
 mod send;
@@ -9,10 +9,11 @@ use local_ip_address::local_ip;
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
 
+use crate::connection::connect_to;
 use crate::manage_chat::{Chat, Member, Message};
 use crate::manage_packets::Packet;
 
@@ -69,59 +70,63 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let chat: Arc<Mutex<Chat>> = Arc::new(Mutex::new(Chat::new()));
 
-    let member_lock_s = member.lock().await.clone();
+    let myself = member.lock().await.clone();
     {
         let mut chat_lock_s = chat.lock().await;
-        chat_lock_s.add_member(member_lock_s); // aggiungo l'utente corrente alla lista membri
+        chat_lock_s.add_member(myself); // aggiungo me stesso alla lista membri
     }
 
     let chat_listening = Arc::clone(&chat);
 
-    let tx_listen = tx.clone();
+    let tx_clone_server = tx.clone();
     tokio::spawn(async move {
         // server side
         loop {
             let (stream, _) = listener.accept().await.expect("Failed to accept");
             let chat_listening_copy = Arc::clone(&chat_listening);
 
-            let rx_listen = tx_listen.subscribe();
-
-            tokio::spawn(async move {
-                listening::listen(stream, chat_listening_copy, rx_listen).await;
-            });
+            listen::listen(stream, chat_listening_copy, tx_clone_server.clone());
         }
     });
 
-    let tx_connect = tx.clone();
     if let Some(params) = args.ip_param {
         // client side
-        let member_clone: Arc<Mutex<Member>> = Arc::clone(&member);
         let chat: Arc<Mutex<Chat>> = Arc::clone(&chat);
 
         let ip: String = params[0].clone();
         let port: u16 = params[1].parse().expect("Port must be a number");
 
+        let tx_clone_client = tx.clone();
+        let tx_clone_listen = tx.clone();
         tokio::spawn(async move {
-            let mut stream = match connect(&ip, port).await {
-                Some(s) => s,
-                None => {
-                    println!("Connection error");
+            let mut stream = match connect_to(&ip, port).await {
+                Ok(s) => s,
+                Err(e) => {
+                    println!("Connection error: {}", e);
                     return;
                 }
             };
 
-            let member_to_send = member_clone.lock().await.clone();
-            let packet_handshake: Packet = Packet::InitSyncRequest(member_to_send);
+            let packet_handshake: Packet = Packet::InitSyncRequest;
             if let Err(e) = send::send(&mut stream, &packet_handshake).await {
                 println!("Error sending messages: {}", e);
+                return;
             }
 
-            if let Err(e) = connection::receive_packet(&mut stream, &chat).await {
+            if let Err(e) = connection::receive_packet(&mut stream, &chat, tx_clone_client).await {
                 println!("Error receiving packets: {}", e);
             }
 
-            let rx_listen = tx_connect.subscribe();
-            listening::listen(stream, chat, rx_listen).await;
+            {
+                let chat_lock = chat.lock().await;
+                    let packet = manage_packets::Packet::Sync((*chat_lock).clone());
+
+                    if let Err(e) = send::send(&mut stream, &packet).await {
+                        println!("Error sending sync: {}", e);
+                    }
+            }
+
+            listen::listen(stream, chat, tx_clone_listen);
         });
     }
 
@@ -132,20 +137,4 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
-}
-
-async fn connect(ip: &String, port: u16) -> Option<TcpStream> {
-    println!("Connecting to {}:{}...", ip, port);
-
-    match connection::connect_to(ip, port).await {
-        Ok(stream) => {
-            println!("Connection established with {}:{}.", ip, port);
-
-            return Some(stream);
-        }
-        Err(e) => {
-            println!("Failed to connect: {}", e);
-            return None;
-        }
-    };
 }

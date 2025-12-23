@@ -3,30 +3,12 @@ use std::sync::Arc;
 
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, broadcast};
 
-use crate::manage_chat::{self, Chat};
+use crate::listen::listen;
+use crate::manage_chat::{self, Chat, Message};
 use crate::manage_packets::Packet;
 use crate::send;
-
-// pub struct Connected {
-//     ip: String,
-//     port: u16
-// }
-
-// impl Connected {
-//     pub fn new(ip: String, port: u16) -> Self {
-//         Self {
-//             ip,
-//             port
-//         }
-//     }
-
-//     pub fn addConnection(&mut self, ip: String, port: u16) {
-//         self.ip = ip;
-//         self.port = port;
-//     }
-// }
 
 pub async fn connect_to(ip: &str, port: u16) -> tokio::io::Result<TcpStream> {
     let address = format!("{}:{}", ip, port);
@@ -43,11 +25,9 @@ pub async fn connect_to(ip: &str, port: u16) -> tokio::io::Result<TcpStream> {
 pub async fn receive_packet(
     stream: &mut TcpStream,
     chat: &Arc<Mutex<Chat>>,
+    tx: broadcast::Sender<Message>,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // il tipo di ritorno dice che è thread safe
-
     let mut buffer = [0; 4096]; // Dati ricevuti dal client
-    let peer_address = stream.peer_addr().expect("Could not get peer address");
 
     match stream.read(&mut buffer).await {
         Ok(0) => {
@@ -67,28 +47,35 @@ pub async fn receive_packet(
                 }
                 Packet::Sync(chat_received) => {
                     let mut chat_lock = chat.lock().await;
-
                     chat_lock.set_all_messages(chat_received.all_messages.clone());
 
-                    
-                    let chat_clone_conn = chat.clone();
-                    let chat_rec_clone = chat_received.clone();
-                    tokio::spawn(async move {
-                        let chat_lock_conn = chat_clone_conn.lock().await;
-                        connect_to_members_received(&chat_lock_conn, &chat_rec_clone).await;
-                    });
+                    let diff: Vec<manage_chat::Member> =
+                        get_members_diff(&chat_lock, &chat_received);
 
-                    chat_lock.set_members(chat_received.members.clone());
-                    chat_lock.print_all_messages();
+                    println!("DIFF: {:?} ++++++++++++++++++++++++++++++++", diff);
 
-                    println!("Received messages");
+                    for m in &diff {
+                        chat_lock.add_member(m.clone());
+                    }
+
+                    if diff.len() >= 1 {
+                        let chat_clone = Arc::clone(chat);
+                        tokio::spawn(async move {
+                            for m in diff {
+                                if let Ok(stream) = connect_to(&m.ip, m.port).await { // PROBLEMA: server vede client come nuovo membro e allora si connette, creando doppia connessione
+                                    let chat_clone_in = Arc::clone(&chat_clone);
+                                    listen(stream, chat_clone_in, tx.clone());
+                                } else {
+                                    eprintln!(
+                                        "Failed to connect to {} at {}:{}",
+                                        m.username, m.ip, m.port
+                                    );
+                                }
+                            }
+                        });
+                    }
                 }
-                Packet::InitSyncRequest(new_member) => {
-                    println!("{} has connected ({})", new_member.username, peer_address);
-
-                    let arc_new_member = Arc::new(Mutex::new(new_member));
-                    manage_chat::add_member(Arc::clone(&chat), arc_new_member).await;
-
+                Packet::InitSyncRequest => {
                     let chat_lock = chat.lock().await;
 
                     let packet = Packet::Sync(chat_lock.clone());
@@ -106,18 +93,16 @@ pub async fn receive_packet(
     Ok(())
 }
 
-async fn connect_to_members_received(chat_lock: &tokio::sync::MutexGuard<'_, Chat>, chat_received: &Chat) {
+fn get_members_diff(
+    chat_lock: &tokio::sync::MutexGuard<'_, Chat>,
+    chat_received: &Chat,
+) -> Vec<manage_chat::Member> {
     let loc_members: HashSet<_> = chat_lock.members.iter().map(|m| &m.id).collect();
 
-    let diff: Vec<_> = chat_received
+    chat_received
         .members
         .iter()
         .filter(|r| !loc_members.contains(&r.id))
-        .collect();
-
-    for d in &diff {
-        if let Err(e) = connect_to(&d.ip, d.port).await {
-            println!("Error connecting with all members: {}", e);
-        }
-    }
+        .map(|r| (**r).clone()) // (*r) dà Arc, (**r) dà Member.
+        .collect()
 }

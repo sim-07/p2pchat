@@ -5,7 +5,7 @@ use tokio::sync::{Mutex, broadcast};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Message {
     // TODO trasferire anche file
     sender: Member,
@@ -84,13 +84,6 @@ impl Chat {
     }
 }
 
-pub async fn add_member(chat: Arc<Mutex<Chat>>, member: Arc<Mutex<Member>>) {
-    let member_data = member.lock().await.clone();
-
-    let mut chat_lock = chat.lock().await;
-    chat_lock.members.push(Arc::new(member_data));
-}
-
 pub async fn start_chat(chat: Arc<Mutex<Chat>>, member: Arc<Mutex<Member>>, tx: broadcast::Sender<Message>) {
     let mut rl = DefaultEditor::new().expect("Failed to create editor");
     println!("--- Chat started ---");
@@ -100,14 +93,14 @@ pub async fn start_chat(chat: Arc<Mutex<Chat>>, member: Arc<Mutex<Member>>, tx: 
 
         match readline {
             Ok(line) => {
-                println!("Message: {}", line);
+                //println!("Message: {}", line);
                 let member_lock = member.lock().await.clone();
                 let mut chat_lock = chat.lock().await;
 
                 let message: Message = Message::new(member_lock, line, get_timestamp());
                 chat_lock.add_message(message.clone());
 
-                if let Err(e) = tx.send(message) { // invio il messaggio sul channel e lo ricevo in listening
+                if let Err(e) = tx.send(message) { // invio il messaggio su tx
                     println!("No users connected ({})", e);
                 }
             }
