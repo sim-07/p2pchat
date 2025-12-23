@@ -72,7 +72,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let chat_listening = Arc::clone(&chat);
 
     let tx_listen = tx.clone();
-    tokio::spawn(async move {
+    tokio::spawn(async move { // server side
         loop {
             let (stream, _) = listener.accept().await.expect("Failed to accept");
             let chat_listening_copy = Arc::clone(&chat_listening);
@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     let tx_connect = tx.clone();
-    if let Some(params) = args.ip_param {
+    if let Some(params) = args.ip_param { // client side
         let member_clone: Arc<Mutex<Member>> = Arc::clone(&member);
         let chat: Arc<Mutex<Chat>> = Arc::clone(&chat);
 
@@ -112,6 +112,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             if let Err(e) = connection::receive_packet(&mut stream, &chat).await {
                 println!("Error receiving packets: {}", e);
             }
+
+            // TODO connettersi a tutti i membri della chat
 
             let rx_listen = tx_connect.subscribe();
             listening::listen(stream, chat, rx_listen).await;

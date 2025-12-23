@@ -26,7 +26,7 @@ pub async fn receive_packet(
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // il tipo di ritorno dice che è thread safe
 
-    let mut buffer = [0; 4096]; // Max amout of bytes from the client
+    let mut buffer = [0; 4096]; // Dati ricevuti dal client
     let peer_address = stream.peer_addr().expect("Could not get peer address");
 
     match stream.read(&mut buffer).await {

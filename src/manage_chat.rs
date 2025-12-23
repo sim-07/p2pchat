@@ -65,16 +65,8 @@ impl Chat {
         self.members = members;
     }
 
-    pub fn get_all_messages(&self) -> Vec<Arc<Message>> {
-        self.all_messages.clone()
-    }
-
     pub fn add_message(&mut self, message: Message) {
         self.all_messages.push(Arc::new(message));
-    }
-
-    pub fn get_members(&self) -> Vec<Arc<Member>> {
-        self.members.clone()
     }
 
     pub fn print_all_messages(&self) {
