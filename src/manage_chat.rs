@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::Mutex;
-
+use tokio::sync::{Mutex, broadcast};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 
@@ -44,7 +43,7 @@ impl Member {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Chat {
     pub all_messages: Vec<Arc<Message>>,
     pub members: Vec<Arc<Member>>,
@@ -80,8 +79,12 @@ impl Chat {
 
     pub fn print_all_messages(&self) {
         for message in &self.all_messages {
-            println!("[{:?}]: {}", message.sender, message.text)
+            println!("[{:?}]: {}", message.sender, message.text);
         }
+    }
+
+    pub fn print_message(&self, message: &Message) {
+        println!("[{:?}]: {}", message.sender, message.text);
     }
 }
 
@@ -92,7 +95,7 @@ pub async fn add_member(chat: Arc<Mutex<Chat>>, member: Arc<Mutex<Member>>) {
     chat_lock.members.push(Arc::new(member_data));
 }
 
-pub async fn start_chat(chat: Arc<Mutex<Chat>>, member: Arc<Mutex<Member>>) {
+pub async fn start_chat(chat: Arc<Mutex<Chat>>, member: Arc<Mutex<Member>>, tx: broadcast::Sender<Message>) {
     let mut rl = DefaultEditor::new().expect("Failed to create editor");
     println!("--- Chat started ---");
 
@@ -106,7 +109,11 @@ pub async fn start_chat(chat: Arc<Mutex<Chat>>, member: Arc<Mutex<Member>>) {
                 let mut chat_lock = chat.lock().await;
 
                 let message: Message = Message::new(member_lock, line, get_timestamp());
-                chat_lock.add_message(message);
+                chat_lock.add_message(message.clone());
+
+                if let Err(e) = tx.send(message) { // invio il messaggio sul channel e lo ricevo in listening
+                    println!("No users connected ({})", e);
+                }
             }
             Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
                 println!("Exiting chat...");

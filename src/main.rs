@@ -10,10 +10,10 @@ use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
 
-use crate::manage_chat::{Chat, Member};
+use crate::manage_chat::{Chat, Member, Message};
 use crate::manage_packets::Packet;
 
 #[derive(Parser, Debug)]
@@ -52,6 +52,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|_| "127.0.0.1".to_string());
     println!("Your local ip: {}", my_ip);
 
+    let (tx, _rx) = broadcast::channel::<Message>(32);
+    
+
     let username = args.username;
     let selected_port: u16 = args.listening_port;
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), selected_port);
@@ -68,20 +71,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let chat: Arc<Mutex<Chat>> = Arc::new(Mutex::new(Chat::new()));
     let chat_listening = Arc::clone(&chat);
 
+    let tx_listen = tx.clone();
     tokio::spawn(async move {
         loop {
             let (stream, _) = listener.accept().await.expect("Failed to accept");
             let chat_listening_copy = Arc::clone(&chat_listening);
 
+            let rx_listen = tx_listen.subscribe();
+            
             tokio::spawn(async move {
-                listening::listen(stream, chat_listening_copy).await;
+                listening::listen(stream, chat_listening_copy, rx_listen).await;
             });
         }
     });
 
+    let tx_connect = tx.clone();
     if let Some(params) = args.ip_param {
         let member_clone: Arc<Mutex<Member>> = Arc::clone(&member);
-        let chat_sync: Arc<Mutex<Chat>> = Arc::clone(&chat);
+        let chat: Arc<Mutex<Chat>> = Arc::clone(&chat);
 
         let ip: String = params[0].clone();
         let port: u16 = params[1].parse().expect("Port must be a number");
@@ -97,22 +104,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let member_to_send = member_clone.lock().await.clone();
 
-            let packet_handshake: Packet = Packet::InitRequest(member_to_send);
-            send::send(&mut stream, &packet_handshake).await;
-
-            if let Ok(chat) = connection::receive_init_chat(&mut stream).await {
-                println!("Received messages");
-
-                let mut lock = chat_sync.lock().await;
-                *lock = chat;
-                lock.print_all_messages();
-            } else {
-                println!("Disconnected");
+            let packet_handshake: Packet = Packet::InitSyncRequest(member_to_send);
+            if let Err(e) = send::send(&mut stream, &packet_handshake).await {
+                println!("Error sending messages: {}", e);
             }
+
+            if let Err(e) = connection::receive_packet(&mut stream, &chat).await {
+                println!("Error receiving packets: {}", e);
+            }
+
+            let rx_listen = tx_connect.subscribe();
+            listening::listen(stream, chat, rx_listen).await;
         });
     }
 
-    manage_chat::start_chat(Arc::clone(&chat), member).await;
+    manage_chat::start_chat(Arc::clone(&chat), member, tx.clone()).await;
 
     if args.file_send {
         //TODO manage_chat::manage_send_files().await;

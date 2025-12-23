@@ -5,6 +5,6 @@ use crate::manage_chat::{Chat, Member, Message};
 #[derive(Serialize, Deserialize)]
 pub enum Packet {
     UserMessage(Message),
-    InitRequest(Member),
+    InitSyncRequest(Member),
     Sync(Chat),
 }
