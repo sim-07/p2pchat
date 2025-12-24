@@ -80,7 +80,7 @@ pub async fn receive_packet(
                         });
                     }
                 }
-                Packet::InitSyncRequest(member) => {
+                Packet::InitSyncRequest(member) => { // inviare anche me stesso così il peer che si connette può aggiungermi alla sua lista di peer e non riconnettersi
                     let mut chat_lock = chat.lock().await;
                     chat_lock.add_member(member);
 
