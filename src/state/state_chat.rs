@@ -7,7 +7,6 @@ use rustyline::error::ReadlineError;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Message {
-    // TODO trasferire anche file
     pub sender: Member,
     pub text: String,
     pub timestamp: u64,

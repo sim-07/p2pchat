@@ -1,12 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-use crate::manage_chat::{Chat, Member, Message};
+use crate::state_chat::{Chat, Member, Message};
 
 #[derive(Serialize, Deserialize)]
 pub enum Packet {
     UserMessage(Message),
-    InitSyncRequest(Member),
+    InitSyncRequest,
     Sync(Chat),
+    Identity(Member)
 }
 
 // TODO prima di qualsiasi messaggio mi connetto e invio un IDENTITY con i miei dati, l'altro utente risponde coi propri dati. 
