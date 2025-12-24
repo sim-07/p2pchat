@@ -53,10 +53,15 @@ pub async fn receive_packet(
                         get_members_diff(&chat_lock, &chat_received);
 
                     println!("DIFF: {:?} ++++++++++++++++++++++++++++++++", diff);
+                    
 
                     for m in &diff {
                         chat_lock.add_member(m.clone());
                     }
+
+                    println!("-------------- MEMBERS -------------------");
+                    println!("{:?}", chat_lock.members);
+                    println!("------------------------------------------");
 
                     if diff.len() >= 1 {
                         let chat_clone = Arc::clone(chat);
@@ -75,8 +80,9 @@ pub async fn receive_packet(
                         });
                     }
                 }
-                Packet::InitSyncRequest => {
-                    let chat_lock = chat.lock().await;
+                Packet::InitSyncRequest(member) => {
+                    let mut chat_lock = chat.lock().await;
+                    chat_lock.add_member(member);
 
                     let packet = Packet::Sync(chat_lock.clone());
                     if let Err(e) = send::send(stream, &packet).await {

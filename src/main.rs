@@ -73,7 +73,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let myself = member.lock().await.clone();
     {
         let mut chat_lock_s = chat.lock().await;
-        chat_lock_s.add_member(myself); // aggiungo me stesso alla lista membri
+        chat_lock_s.add_member(myself.clone()); // aggiungo me stesso alla lista membri
     }
 
     let chat_listening = Arc::clone(&chat);
@@ -98,6 +98,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         let tx_clone_client = tx.clone();
         let tx_clone_listen = tx.clone();
+
+        let myself_clone = myself.clone();
         tokio::spawn(async move {
             let mut stream = match connect_to(&ip, port).await {
                 Ok(s) => s,
@@ -107,7 +109,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             };
 
-            let packet_handshake: Packet = Packet::InitSyncRequest;
+            let packet_handshake: Packet = Packet::InitSyncRequest(myself_clone);
             if let Err(e) = send::send(&mut stream, &packet_handshake).await {
                 println!("Error sending messages: {}", e);
                 return;
@@ -115,15 +117,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             if let Err(e) = connection::receive_packet(&mut stream, &chat, tx_clone_client).await {
                 println!("Error receiving packets: {}", e);
-            }
-
-            {
-                let chat_lock = chat.lock().await;
-                    let packet = manage_packets::Packet::Sync((*chat_lock).clone());
-
-                    if let Err(e) = send::send(&mut stream, &packet).await {
-                        println!("Error sending sync: {}", e);
-                    }
             }
 
             listen::listen(stream, chat, tx_clone_listen);

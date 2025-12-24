@@ -8,9 +8,9 @@ use rustyline::error::ReadlineError;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Message {
     // TODO trasferire anche file
-    sender: Member,
-    text: String,
-    timestamp: u64,
+    pub sender: Member,
+    pub text: String,
+    pub timestamp: u64,
 }
 
 impl Message {
@@ -80,7 +80,7 @@ impl Chat {
     }
 
     pub fn print_message(&self, message: &Message) {
-        println!("[{:?}]: {}", message.sender, message.text);
+        println!("[{:?}]: {}", message.sender.username, message.text);
     }
 }
 

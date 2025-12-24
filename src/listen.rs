@@ -13,6 +13,9 @@ pub fn listen(
 ) {
     let mut rx = tx.subscribe();
 
+    let peer_addr = stream.peer_addr().map(|a| a.to_string()).unwrap_or_else(|_| "Unknown".to_string());
+    println!("[DEBUG] Starting listen task for peer: {}", peer_addr);
+
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -29,8 +32,10 @@ pub fn listen(
                 loc = rx.recv() => {
                     match loc {
                         Ok(message) => {
+                            println!("[DEBUG] Sending message to {}: {:?}", peer_addr, message.text);
+
                             let packet = Packet::UserMessage(message);
-                            
+
                             if let Err(e) = send::send(&mut stream, &packet).await { 
                                 println!("Failed to send to peer: {}", e);
                                 break;
