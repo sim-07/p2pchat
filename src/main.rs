@@ -9,8 +9,8 @@ use crate::state::state_chat::{self, Chat, Member, Message};
 use crate::state::state_packets::Packet;
 
 use crate::network::connect_to::connect_to;
-use crate::network::send;
-use crate::ui::handle_input;
+use crate::network::send::{self, send};
+use crate::ui::handle_input::start_chat;
 
 use clap::Parser;
 use local_ip_address::local_ip;
@@ -18,7 +18,7 @@ use rand::random;
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
 
@@ -53,6 +53,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
+    let (tx, _rx) = broadcast::channel::<Message>(32);
     let selected_port: u16 = args.listening_port;
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), selected_port);
     let listener = TcpListener::bind(&addr).await.expect("Failed to bind");
@@ -63,115 +64,67 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Your local ip: {}", my_ip);
     let username: String = args.username.unwrap_or_else(|| rand_username());
 
-    let myself: Arc<Mutex<Member>> = Arc::new(Mutex::new(Member::new(
+    let myself = Arc::new(Member::new(
         username.clone(),
         my_ip,
         used_port,
         Uuid::new_v4().to_string(),
-    )));
+    ));
     let chat: Arc<Mutex<Chat>> = Arc::new(Mutex::new(Chat::new()));
 
-    tokio::spawn(async move {
-        loop {
-            let (stream, _) = listener.accept().await.expect("Failed to accept");
-            let chat_clone = Arc::clone(&chat);
-            let myself_clone = myself.clone();
+    let myself_listen = Arc::clone(&myself);
+    if let Some(params) = args.ip_param {
+        let ip_to_connect: String = params[0].clone();
+        let port_to_connect: u16 = params[1].parse().expect("Port must be a number");
+        let myself_connect = Arc::clone(&myself);
+        let chat = chat.clone();
 
-            tokio::spawn(async move {
-                if let Some(packet) = listen(stream).await {
-                    handle_packet(packet, &chat_clone, myself_clone).await;
+        tokio::spawn(async move {
+            let mut stream = match connect_to(&ip_to_connect, port_to_connect).await {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!(
+                        "Error connecting to {}:{}: {}",
+                        ip_to_connect, port_to_connect, e
+                    );
+                    return;
                 }
-            });
-        }
-    });
+            };
 
-    // let args = Cli::parse();
+            let packet_id = Packet::Identity((*myself_connect).clone(), true);
+            if let Err(e) = send(&mut stream, &packet_id).await {
+                eprintln!("Error sending identity: {}", e);
+            }
 
-    // if args.quit {
-    //     println!("DISCONNECTED");
-    //     return Ok(());
-    // }
+            let packet_init = Packet::InitSyncRequest;
+            if let Err(e) = send(&mut stream, &packet_init).await {
+                eprintln!("Error sending init: {}", e);
+            }
 
-    // let my_ip: String = local_ip()
-    //     .map(|ip| ip.to_string())
-    //     .unwrap_or_else(|_| "127.0.0.1".to_string());
-    // println!("Your local ip: {}", my_ip);
+            let chat_clone = Arc::clone(&chat);
+            let myself_in = Arc::clone(&myself_listen);
 
-    // let (tx, _rx) = broadcast::channel::<Message>(32);
+            tokio::spawn(listen_main(chat_clone, myself_in, stream));
+        });
+    } else {
+        // Utente che starta la chat
 
-    // let username = args.username;
-    // let selected_port: u16 = args.listening_port;
-    // let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), selected_port);
-    // let listener = TcpListener::bind(&addr).await.expect("Failed to bind");
-    // let used_port = listener.local_addr()?.port(); // anche se l'utente non ha impostato nessuna porta con quella di default a 0 l'OS sceglierà una porta libera
-    // println!("Your port: {}", used_port);
-    // let member: Arc<Mutex<Member>> = Arc::new(Mutex::new(Member::new(
-    //     username.clone(),
-    //     my_ip,
-    //     used_port,
-    //     Uuid::new_v4().to_string(),
-    // )));
+        let chat = chat.clone();
+        tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await.expect("Failed to accept");
+                let stream = stream;
 
-    // let chat: Arc<Mutex<Chat>> = Arc::new(Mutex::new(Chat::new()));
+                let chat_clone = Arc::clone(&chat);
+                let myself_in = Arc::clone(&myself_listen);
 
-    // let myself = member.lock().await.clone();
-    // {
-    //     let mut chat_lock_s = chat.lock().await;
-    //     chat_lock_s.add_member(myself.clone()); // aggiungo me stesso alla lista membri
-    // }
+                tokio::spawn(listen_main(chat_clone, myself_in, stream));
+            }
+        });
+    }    
 
-    // let chat_listening = Arc::clone(&chat);
-
-    // let tx_clone_server = tx.clone();
-    // tokio::spawn(async move {
-    //     // server side
-    //     loop {
-    //         let (stream, _) = listener.accept().await.expect("Failed to accept");
-    //         let chat_listening_copy = Arc::clone(&chat_listening);
-
-    //         listen::listen(stream, chat_listening_copy, tx_clone_server.clone());
-    //     }
-    // });
-
-    // if let Some(params) = args.ip_param {
-    //     // client side
-    //     let chat: Arc<Mutex<Chat>> = Arc::clone(&chat);
-
-    //     let ip: String = params[0].clone();
-    //     let port: u16 = params[1].parse().expect("Port must be a number");
-
-    //     let tx_clone_client = tx.clone();
-    //     let tx_clone_listen = tx.clone();
-
-    //     let myself_clone = myself.clone();
-    //     tokio::spawn(async move {
-    //         let mut stream = match connect_to(&ip, port).await {
-    //             Ok(s) => s,
-    //             Err(e) => {
-    //                 println!("Connection error: {}", e);
-    //                 return;
-    //             }
-    //         };
-
-    //         let packet_handshake: Packet = Packet::InitSyncRequest(myself_clone);
-    //         if let Err(e) = send::send(&mut stream, &packet_handshake).await {
-    //             println!("Error sending messages: {}", e);
-    //             return;
-    //         }
-
-    //         if let Err(e) = connection::receive_packet(&mut stream, &chat, tx_clone_client).await {
-    //             println!("Error receiving packets: {}", e);
-    //         }
-
-    //         listen::listen(stream, chat, tx_clone_listen);
-    //     });
-    // }
-
-    // manage_chat::start_chat(Arc::clone(&chat), member, tx.clone()).await;
-
-    // if args.file_send {
-    //     //TODO manage_chat::manage_send_files().await;
-    // }
+    let chat_clone = Arc::clone(&chat);
+    start_chat(chat_clone, myself, tx.clone()).await;
 
     Ok(())
 }
@@ -180,4 +133,14 @@ fn rand_username() -> String {
     (0..4)
         .map(|_| (0x20u8 + (random::<f32>() * 96.0) as u8) as char)
         .collect()
+}
+
+async fn listen_main(chat: Arc<Mutex<Chat>>, myself: Arc<Member>, mut stream: TcpStream) { // TODO gestione invio messaggi
+    loop {
+        if let Some(packet) = listen(&mut stream).await {
+            handle_packet(packet, &chat, &*myself, &mut stream).await;
+        } else {
+            break;
+        }
+    }
 }

@@ -2,7 +2,7 @@ use tokio::net::TcpStream;
 use tokio::io::AsyncReadExt;
 use crate::state::state_packets::Packet;
 
-pub async fn listen(mut stream: TcpStream) -> Option<Packet> {
+pub async fn listen(stream: &mut TcpStream) -> Option<Packet> {
     let mut buffer = [0; 4096];
 
     match stream.read(&mut buffer).await {
