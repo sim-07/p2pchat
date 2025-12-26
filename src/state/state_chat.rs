@@ -1,5 +1,28 @@
 use serde::{Deserialize, Serialize};
+use tokio::sync::{Mutex, mpsc};
 use std::sync::Arc;
+
+use crate::state::state_packets::Packet;
+
+#[derive(Clone)]
+pub struct Connections {
+    pub connections: Arc<Mutex<Vec<mpsc::UnboundedSender<Packet>>>>,
+}
+
+impl Connections {
+    pub fn new() -> Self {
+        Self {
+            connections: Arc::new(Mutex::new(vec![])),
+        }
+    }
+
+    pub async fn broadcast(&self, packet: Packet) {
+        let mut conn = self.connections.lock().await;
+        conn.retain(|tx| {
+            tx.send(packet.clone()).is_ok()
+        });
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Message {

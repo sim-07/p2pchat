@@ -2,12 +2,20 @@ use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 
 use std::sync::Arc;
-use tokio::sync::{Mutex, broadcast};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::Mutex;
 
-use crate::state_chat::{Chat, Member, Message};
+use crate::state::state_chat::Connections;
+use crate::{
+    state::state_packets::Packet,
+    state_chat::{Chat, Member, Message},
+};
 
-pub async fn start_chat(chat: Arc<Mutex<Chat>>, member: Arc<Member>, tx: broadcast::Sender<Message>) {
+pub async fn handle_input(
+    chat: Arc<Mutex<Chat>>,
+    member: Arc<Member>,
+    connections: Connections,
+) {
     let mut rl = DefaultEditor::new().expect("Failed to create editor");
     println!("--- Chat started ---");
 
@@ -16,14 +24,19 @@ pub async fn start_chat(chat: Arc<Mutex<Chat>>, member: Arc<Member>, tx: broadca
 
         match readline {
             Ok(line) => {
-                //println!("Message: {}", line);
                 let mut chat_lock = chat.lock().await;
 
-                let message: Message = Message::new((*member).username.clone(), line, get_timestamp());
+                let message: Message =
+                    Message::new((*member).username.clone(), line, get_timestamp());
                 chat_lock.add_message(message.clone());
 
-                if let Err(e) = tx.send(message) { // invio il messaggio su tx
-                    println!("No users connected ({})", e);
+                let packet: Packet = Packet::UserMessage(message);
+
+                {
+                    let conns = connections.connections.lock().await;
+                    for c in conns.iter() {
+                        let _ = c.send(packet.clone());
+                    }
                 }
             }
             Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {

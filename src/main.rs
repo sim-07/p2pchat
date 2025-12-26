@@ -5,12 +5,12 @@ mod ui;
 
 use crate::handler::handle_packet::handle_packet;
 use crate::network::listen::listen;
-use crate::state::state_chat::{self, Chat, Member, Message};
+use crate::state::state_chat::{self, Chat, Connections, Member, Message};
 use crate::state::state_packets::Packet;
 
 use crate::network::connect_to::connect_to;
 use crate::network::send::{self, send};
-use crate::ui::handle_input::start_chat;
+use crate::ui::handle_input::handle_input;
 
 use clap::Parser;
 use local_ip_address::local_ip;
@@ -19,7 +19,7 @@ use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, mpsc};
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
@@ -53,8 +53,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let (tx, _rx) = broadcast::channel::<Message>(32);
     let selected_port: u16 = args.listening_port;
+    let connections: Connections = Connections::new();
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), selected_port);
     let listener = TcpListener::bind(&addr).await.expect("Failed to bind");
     let used_port = listener.local_addr()?.port();
@@ -108,7 +108,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         });
     } else {
         // Utente che starta la chat
-
         let chat = chat.clone();
         tokio::spawn(async move {
             loop {
@@ -118,13 +117,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let chat_clone = Arc::clone(&chat);
                 let myself_in = Arc::clone(&myself_listen);
 
-                tokio::spawn(listen_main(chat_clone, myself_in, stream));
+                tokio::spawn(listen_main(chat_clone, myself_in, stream, connections));
             }
         });
     }    
 
     let chat_clone = Arc::clone(&chat);
-    start_chat(chat_clone, myself, tx.clone()).await;
+
+    handle_input(chat_clone, myself, connections).await;
 
     Ok(())
 }
@@ -135,10 +135,26 @@ fn rand_username() -> String {
         .collect()
 }
 
-async fn listen_main(chat: Arc<Mutex<Chat>>, myself: Arc<Member>, mut stream: TcpStream) { // TODO gestione invio messaggi
+async fn listen_main(chat: Arc<Mutex<Chat>>, myself: Arc<Member>, mut stream: TcpStream, connections: Connections) {
+    let (mut reader, mut writer) = stream.into_split();
+    let (tx, mut rx) = mpsc::unbounded_channel::<Packet>();
+
+    {
+        let mut c_lock = connections.connections.lock().await;
+        c_lock.push(tx);
+    }
+
+    tokio::spawn(async move {
+        while let Some(packet) = rx.recv().await { // appena riceve il mess sul rx lo invia a tutti i membri della chat
+            if let Err(_) = send(&mut writer, &packet).await {
+                break; 
+            }
+        }
+    });
+
     loop {
-        if let Some(packet) = listen(&mut stream).await {
-            handle_packet(packet, &chat, &*myself, &mut stream).await;
+        if let Some(packet) = listen(&mut reader).await {
+            handle_packet(packet, &chat, &*myself, tx.clone()).await;
         } else {
             break;
         }

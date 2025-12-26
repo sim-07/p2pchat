@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::state_chat::{Chat, Member, Message};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum Packet {
     UserMessage(Message),
     InitSyncRequest,

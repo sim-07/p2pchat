@@ -3,19 +3,21 @@ use std::sync::Arc;
 
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::UnboundedSender;
 
+use crate::network::connect_to::connect_to;
 use crate::send::send;
 use crate::state::state_chat::Member;
 use crate::state::state_packets::Packet;
 use crate::state_chat::{self, Chat};
-use crate::ui::handle_output::print_message;
 use crate::ui::handle_output;
+use crate::ui::handle_output::print_message;
 
 pub async fn handle_packet(
     packet: Packet,
     chat: &Arc<Mutex<Chat>>,
     myself: &Member,
-    stream: &mut TcpStream,
+    tx: UnboundedSender<Packet>,
 ) {
     match packet {
         Packet::UserMessage(message) => {
@@ -36,9 +38,15 @@ pub async fn handle_packet(
             for m in &diff {
                 chat_lock.add_member(m.clone());
 
+                if let Err(e) = connect_to(&m.ip, m.port).await {
+                    println!("Problem connect_to in Sync: {}", e);
+                }
+
+                //TODO creare tokio::spawn e mettere listen per ogni nuova connessione
                 let packet = Packet::Identity(myself.clone(), false);
-                if let Err(e) = send(stream, &packet).await {
-                    println!("Error sending identity Sync: {}", e);
+
+                if let Err(e) = tx.send(packet) { // invio il messaggio a listen_main che poi si occupa di inviarlo
+                    println!("Connection error in Sync: {}", e);
                     return;
                 }
             }
@@ -48,9 +56,10 @@ pub async fn handle_packet(
             let chat_lock = chat.lock().await;
             let packet = Packet::Sync(chat_lock.clone());
 
-            if let Err(e) = send(stream, &packet).await {
-                println!("Connection error sending message: {}", e);
-            }
+            if let Err(e) = tx.send(packet) {
+                    println!("Connection error in InitSyncRequest: {}", e);
+                    return;
+                }
         }
 
         Packet::Identity(new_member, idback) => {
@@ -60,8 +69,8 @@ pub async fn handle_packet(
             let packet = Packet::Identity(myself.clone(), false);
 
             if idback {
-                if let Err(e) = send(stream, &packet).await {
-                    println!("Error sending identity Identity: {}", e);
+                if let Err(e) = tx.send(packet) {
+                    println!("Connection error in Identity: {}", e);
                     return;
                 }
             }
