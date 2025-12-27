@@ -1,13 +1,12 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::network::connect_to::connect_to;
-use crate::send::send;
-use crate::state::state_chat::Member;
+use crate::network::listen::listen_main;
+use crate::state::state_chat::{Connections, Member};
 use crate::state::state_packets::Packet;
 use crate::state_chat::{self, Chat};
 use crate::ui::handle_output;
@@ -18,6 +17,7 @@ pub async fn handle_packet(
     chat: &Arc<Mutex<Chat>>,
     myself: &Member,
     tx: UnboundedSender<Packet>,
+    connections: Connections,
 ) {
     match packet {
         Packet::UserMessage(message) => {
@@ -28,24 +28,29 @@ pub async fn handle_packet(
         }
 
         Packet::Sync(chat_received) => {
-            let mut chat_lock = chat.lock().await;
-            chat_lock.set_all_messages(chat_received.all_messages.clone());
-            handle_output::print_all_messages(chat_received.all_messages);
+            let diff: Vec<state_chat::Member>;
+            {
+                let mut chat_lock = chat.lock().await;
+                chat_lock.set_all_messages(chat_received.all_messages.clone());
+                handle_output::print_all_messages(chat_received.all_messages);
 
-            let diff: Vec<state_chat::Member> =
-                get_members_diff(&chat_lock.members, &chat_received.members);
+                diff = get_members_diff(&chat_lock.members, &chat_received.members);
 
-            for m in &diff {
-                chat_lock.add_member(m.clone());
-
-                if let Err(e) = connect_to(&m.ip, m.port).await {
-                    println!("Problem connect_to in Sync: {}", e);
+                for m in diff.clone() {
+                    chat_lock.add_member(m.clone());
                 }
+            }
 
-                //TODO creare tokio::spawn e mettere listen per ogni nuova connessione
+            for m in diff.clone() {
+                let chat_clone = Arc::clone(chat);
+                let myself_clone = Arc::new(myself.clone());
+                let conns_clone = connections.clone();
+
+                conn(m, chat_clone, myself_clone, conns_clone);
+
                 let packet = Packet::Identity(myself.clone(), false);
 
-                if let Err(e) = tx.send(packet) { // invio il messaggio a listen_main che poi si occupa di inviarlo
+                if let Err(e) = tx.send(packet) {
                     println!("Connection error in Sync: {}", e);
                     return;
                 }
@@ -57,9 +62,9 @@ pub async fn handle_packet(
             let packet = Packet::Sync(chat_lock.clone());
 
             if let Err(e) = tx.send(packet) {
-                    println!("Connection error in InitSyncRequest: {}", e);
-                    return;
-                }
+                println!("Connection error in InitSyncRequest: {}", e);
+                return;
+            }
         }
 
         Packet::Identity(new_member, idback) => {
@@ -86,4 +91,19 @@ fn get_members_diff(m_loc: &Vec<Arc<Member>>, m_rec: &Vec<Arc<Member>>) -> Vec<s
         .filter(|r| !loc_members.contains(&r.id))
         .map(|r| (**r).clone()) // (*r) dà Arc, (**r) dà Member.
         .collect()
+}
+
+fn conn(m: Member, chat_clone: Arc<Mutex<Chat>>, myself_clone: Arc<Member>, conns_clone: Connections) {
+    tokio::spawn(async move {
+        match connect_to(&m.ip, m.port).await {
+            Ok(stream) => {
+                let (reader, writer) = stream.into_split();
+                listen_main(chat_clone, myself_clone, reader, writer, conns_clone).await;
+            }
+            Err(e) => {
+                println!("Problem connect_to in Sync: {}", e);
+                return;
+            }
+        }
+    });
 }

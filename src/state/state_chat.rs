@@ -15,13 +15,6 @@ impl Connections {
             connections: Arc::new(Mutex::new(vec![])),
         }
     }
-
-    pub async fn broadcast(&self, packet: Packet) {
-        let mut conn = self.connections.lock().await;
-        conn.retain(|tx| {
-            tx.send(packet.clone()).is_ok()
-        });
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -43,7 +36,6 @@ impl Message {
 
 #[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
 pub struct Member {
-    // TODO creare nel main se stessi e aggiungersi a members. Poi inviare la nuova lista membri a tutti (aggiungere verifica legittimità)
     pub ip: String,
     pub port: u16,
     pub username: String,
