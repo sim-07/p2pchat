@@ -11,6 +11,7 @@ use crate::state::state_packets::Packet;
 use crate::state_chat::{self, Chat};
 use crate::ui::handle_output;
 use crate::ui::handle_output::print_message;
+use crate::network::send::send;
 
 pub async fn handle_packet(
     packet: Packet,
@@ -46,14 +47,9 @@ pub async fn handle_packet(
                 let myself_clone = Arc::new(myself.clone());
                 let conns_clone = connections.clone();
 
-                conn(m, chat_clone, myself_clone, conns_clone);
-
                 let packet = Packet::Identity(myself.clone(), false);
 
-                if let Err(e) = tx.send(packet) {
-                    println!("Connection error in Sync: {}", e);
-                    return;
-                }
+                conn(m, chat_clone, myself_clone, conns_clone, packet);
             }
         }
 
@@ -68,12 +64,19 @@ pub async fn handle_packet(
         }
 
         Packet::Identity(new_member, idback) => {
-            let mut chat_lock = chat.lock().await;
-            chat_lock.add_member(new_member);
+            {
+                let mut chat_lock = chat.lock().await;
+
+                if chat_lock.members.iter().any(|m| m.id == new_member.id) {
+                    println!("Ricevuto membro già presente in members: {:?}", new_member);
+                } else {
+                    chat_lock.add_member(new_member);
+                }
+            }
 
             let packet = Packet::Identity(myself.clone(), false);
 
-            if idback {
+            if idback == true {
                 if let Err(e) = tx.send(packet) {
                     println!("Connection error in Identity: {}", e);
                     return;
@@ -93,11 +96,20 @@ fn get_members_diff(m_loc: &Vec<Arc<Member>>, m_rec: &Vec<Arc<Member>>) -> Vec<s
         .collect()
 }
 
-fn conn(m: Member, chat_clone: Arc<Mutex<Chat>>, myself_clone: Arc<Member>, conns_clone: Connections) {
+fn conn(
+    m: Member,
+    chat_clone: Arc<Mutex<Chat>>,
+    myself_clone: Arc<Member>,
+    conns_clone: Connections,
+    packet: Packet,
+) {
     tokio::spawn(async move {
         match connect_to(&m.ip, m.port).await {
             Ok(stream) => {
-                let (reader, writer) = stream.into_split();
+                let (reader, mut writer) = stream.into_split();
+                if let Err(e) = send(&mut writer, &packet).await {
+                    println!("Error sending identity: {}", e);
+                }
                 listen_main(chat_clone, myself_clone, reader, writer, conns_clone).await;
             }
             Err(e) => {

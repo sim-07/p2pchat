@@ -73,6 +73,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ));
     let chat: Arc<Mutex<Chat>> = Arc::new(Mutex::new(Chat::new()));
 
+    {
+        let mut chat_lock = chat.lock().await;
+        chat_lock.add_member((*myself).clone());
+    }
+
+    // CONNECT
     let myself_listen = Arc::clone(&myself);
     if let Some(params) = args.ip_param {
         let ip_to_connect: String = params[0].clone();
@@ -85,7 +91,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let stream = match connect_to(&ip_to_connect, port_to_connect).await {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!(
+                    println!(
                         "Error connecting to {}:{}: {}",
                         ip_to_connect, port_to_connect, e
                     );
@@ -97,49 +103,46 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let packet_id = Packet::Identity((*myself_connect).clone(), true);
             if let Err(e) = send(&mut writer, &packet_id).await {
-                eprintln!("Error sending identity: {}", e);
-            }
+                println!("Error sending identity: {}", e);
+            } 
 
             let packet_init = Packet::InitSyncRequest;
             if let Err(e) = send(&mut writer, &packet_init).await {
-                eprintln!("Error sending init: {}", e);
+                println!("Error sending init: {}", e);
             }
 
             let chat_clone = Arc::clone(&chat);
             let myself_in = Arc::clone(&myself_listen);
 
             tokio::spawn(listen_main(
-                chat_clone,
-                myself_in,
-                reader,
-                writer,
-                conn_clone,
+                chat_clone, myself_in, reader, writer, conn_clone,
             ));
-        });
-    } else {
-        // Utente che starta la chat
-        let chat = chat.clone();
-        let conn_clone = connections.clone();
-
-        tokio::spawn(async move {
-            loop {
-                let (stream, _) = listener.accept().await.expect("Failed to accept");
-                let stream = stream;
-
-                let chat_clone = Arc::clone(&chat);
-                let myself_in = Arc::clone(&myself_listen);
-                let conn_clone = conn_clone.clone();
-
-                let (reader, writer) = stream.into_split();
-                tokio::spawn(listen_main(
-                    chat_clone, myself_in, reader, writer, conn_clone,
-                ));
-            }
         });
     }
 
-    let chat_clone = Arc::clone(&chat);
+    // LISTEN
+    let chat_clone: Arc<Mutex<Chat>> = Arc::clone(&chat);
+    let conn_clone: Connections = connections.clone();
+    let myself_clone: Arc<Member> = Arc::clone(&myself);
 
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = listener.accept().await.expect("Failed to accept");
+
+            let stream = stream;
+
+            let chat_clone = Arc::clone(&chat_clone);
+            let myself_in = Arc::clone(&myself_clone);
+            let conn_clone = conn_clone.clone();
+
+            let (reader, writer) = stream.into_split();
+            tokio::spawn(listen_main(
+                chat_clone, myself_in, reader, writer, conn_clone,
+            ));
+        }
+    });
+
+    let chat_clone = Arc::clone(&chat);
     handle_input(chat_clone, myself, connections.clone()).await;
 
     Ok(())
