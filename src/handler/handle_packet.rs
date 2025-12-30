@@ -6,12 +6,12 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::network::connect_to::connect_to;
 use crate::network::listen::listen_main;
+use crate::network::send::send;
 use crate::state::state_chat::{Connections, Member};
 use crate::state::state_packets::Packet;
 use crate::state_chat::{self, Chat};
 use crate::ui::handle_output;
 use crate::ui::handle_output::print_message;
-use crate::network::send::send;
 
 pub async fn handle_packet(
     packet: Packet,
@@ -27,7 +27,6 @@ pub async fn handle_packet(
             print_message(&message);
             chat_lock.add_message(message);
         }
-
         Packet::Sync(chat_received) => {
             let diff: Vec<state_chat::Member>;
             {
@@ -52,7 +51,6 @@ pub async fn handle_packet(
                 conn(m, chat_clone, myself_clone, conns_clone, packet);
             }
         }
-
         Packet::InitSyncRequest => {
             let chat_lock = chat.lock().await;
             let packet = Packet::Sync(chat_lock.clone());
@@ -62,7 +60,6 @@ pub async fn handle_packet(
                 return;
             }
         }
-
         Packet::Identity(new_member, idback) => {
             {
                 let mut chat_lock = chat.lock().await;

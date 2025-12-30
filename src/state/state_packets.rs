@@ -7,5 +7,5 @@ pub enum Packet {
     UserMessage(Message),
     InitSyncRequest,
     Sync(Chat),
-    Identity(Member, bool)
+    Identity(Member, bool),
 }

@@ -53,6 +53,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bincode"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd6a120d2e16b3e1b4a24bd70f23b12d3e16b81f113364a26935f8db7245452d"
+
+[[package]]
 name = "bitflags"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -443,12 +449,14 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 name = "p2pchat"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "clap",
  "local-ip-address",
  "rand",
  "rustyline",
  "serde",
  "serde_json",
+ "socket2",
  "tokio",
  "uuid",
 ]

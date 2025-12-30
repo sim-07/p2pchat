@@ -20,7 +20,7 @@ pub async fn get_packet(reader: &mut BufReader<OwnedReadHalf>) -> Option<Packet>
     match reader.read_line(&mut line).await {
         // legge fino a \n che ho messo in send per delimitare i messaggi
         Ok(0) => {
-            println!("Peer disconnected");
+            println!("Peer disconnected"); // TODO aggiornare lista membri
             None
         }
         Ok(_) => match serde_json::from_str::<Packet>(line.trim()) {

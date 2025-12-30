@@ -2,7 +2,9 @@ mod handler;
 mod network;
 mod state;
 mod ui;
+mod discovery;
 
+use crate::discovery::listen_discovery::listen_discovery;
 use crate::network::listen::listen_main;
 use crate::state::state_chat::{self, Chat, Connections, Member};
 use crate::state::state_packets::Packet;
@@ -33,8 +35,8 @@ struct Cli {
     #[arg(short = 'u', long = "username")]
     username: Option<String>,
 
-    #[arg(short = 'i', long = "initchat")]
-    chat_init: bool,
+    #[arg(short = 'd', long = "discovery")]
+    discovery: bool,
 
     #[arg(short = 'f', long = "filesend")]
     file_send: bool,
@@ -67,7 +69,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let myself = Arc::new(Member::new(
         username.clone(),
-        my_ip,
+        my_ip.clone(),
         used_port,
         Uuid::new_v4().to_string(),
     ));
@@ -117,6 +119,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             tokio::spawn(listen_main(
                 chat_clone, myself_in, reader, writer, conn_clone,
             ));
+
         });
     }
 
@@ -141,6 +144,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ));
         }
     });
+
+    tokio::spawn(listen_discovery(my_ip.clone(), used_port));
 
     let chat_clone = Arc::clone(&chat);
     handle_input(chat_clone, myself, connections.clone()).await;
