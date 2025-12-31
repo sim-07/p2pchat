@@ -1,4 +1,3 @@
-use std::net::SocketAddr;
 use tokio::{net::UdpSocket, sync::mpsc};
 
 use crate::state::state_discovery::DiscoveryPacket;
@@ -8,27 +7,28 @@ pub async fn handle_packet_discovery(
     ip: String,
     port: u16,
     udp_socket: &UdpSocket,
-    addr: SocketAddr,
     tx: mpsc::UnboundedSender<(String, u16)>,
     my_id: String,
 ) {
     match packet_rec {
         DiscoveryPacket::Discovery(id) => {
-            println!("Received Discovery");
 
             if id != my_id {
-                let reply = DiscoveryPacket::DiscoveryRes(ip, port);
+                let reply = DiscoveryPacket::DiscoveryRes(ip, port, my_id, id);
                 let reply_bytes = serde_json::to_vec(&reply).unwrap();
 
-                if let Err(e) = udp_socket.send_to(&reply_bytes, addr).await {
+                let multicast_addr = "239.255.42.99:9000";
+
+                if let Err(e) = udp_socket.send_to(&reply_bytes, multicast_addr).await {
                     println!("Error discovery: {}", e);
                 }
             }
         }
-        DiscoveryPacket::DiscoveryRes(ip_res, port_res) => {
-            println!("Received DiscoveryRes");
-            if let Err(e) = tx.send((ip_res, port_res)) {
-                println!("Error DiscoveryRes: {}", e);
+        DiscoveryPacket::DiscoveryRes(ip_res, port_res, id_sender, rec_id) => {
+            if id_sender != my_id && rec_id == my_id {
+                if let Err(e) = tx.send((ip_res, port_res)) {
+                    println!("Error DiscoveryRes: {}", e);
+                }
             }
         }
     }

@@ -33,10 +33,10 @@ pub async fn listen_discovery(ip: String, port: u16, tx: mpsc::UnboundedSender<(
 
     let mut buf = [0u8; 1024];
     loop {
-        if let Ok((len, addr)) = udp_socket.recv_from(&mut buf).await {
+        if let Ok((len, _addr)) = udp_socket.recv_from(&mut buf).await {
             
             if let Ok(packet_rec) = serde_json::from_slice::<DiscoveryPacket>(&buf[..len]) {
-                handle_packet_discovery(packet_rec, ip.clone(), port, &udp_socket, addr, tx.clone(), id.clone()).await;
+                handle_packet_discovery(packet_rec, ip.clone(), port, &udp_socket, tx.clone(), id.clone()).await;
             }
         }
     }
