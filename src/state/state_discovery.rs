@@ -2,6 +2,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum DiscoveryPacket {
-    Discovery,
+    Discovery(String),
     DiscoveryRes(String, u16),
 }
