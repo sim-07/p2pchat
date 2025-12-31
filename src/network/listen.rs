@@ -19,10 +19,7 @@ pub async fn get_packet(reader: &mut BufReader<OwnedReadHalf>) -> Option<Packet>
 
     match reader.read_line(&mut line).await {
         // legge fino a \n che ho messo in send per delimitare i messaggi
-        Ok(0) => {
-            println!("Peer disconnected"); // TODO aggiornare lista membri
-            None
-        }
+        Ok(0) => None,
         Ok(_) => match serde_json::from_str::<Packet>(line.trim()) {
             Ok(packet) => Some(packet),
             Err(e) => {
@@ -61,13 +58,27 @@ pub async fn listen_main(
         }
     });
 
+    let mut remote_id: Option<String> = None; // per sapere chi devo rimuovere quando qualcuno si disconnette
     let mut buf_reader = BufReader::new(reader);
     loop {
         match get_packet(&mut buf_reader).await {
             Some(packet) => {
+                if let Packet::Identity(member, _) = &packet {
+                    remote_id = Some(member.id.clone());
+                }
+
                 handle_packet(packet, &chat, &*myself, tx.clone(), connections.clone()).await;
             }
-            None => break,
+            None => {
+                println!("Peer disconnected");
+
+                if let Some(remote_id) = remote_id {
+                    let mut chat_lock = chat.lock().await;
+                    chat_lock.members.retain(|m| m.id != remote_id);
+                }
+
+                break;
+            }
         }
     }
 }
