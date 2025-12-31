@@ -27,7 +27,7 @@ pub async fn handle_packet_discovery(
         DiscoveryPacket::DiscoveryRes(ip_res, port_res, id_sender, rec_id) => {
             if id_sender != my_id && rec_id == my_id {
                 if let Err(e) = tx.send((ip_res, port_res)) {
-                    println!("Error DiscoveryRes: {}", e);
+                    //println!("Error DiscoveryRes: {}", e);
                 }
             }
         }
